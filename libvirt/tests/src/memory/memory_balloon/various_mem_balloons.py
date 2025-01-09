@@ -1,4 +1,5 @@
 from virttest import virsh
+import re
 
 from avocado.utils import process
 
@@ -15,12 +16,9 @@ def run(test, params, env):
     1.memory balloon models: virtio, virtio-transitional, virtio-non-transitional.
     """
 
-    def setup_vm_memory(vmxml, params):
+    def setup_vm_memory():
         """
-        Setup vm memory and current memory tags  according params
-
-        :params vmxml: vmxml object
-        :params params: Dictionary with the test parameters
+        Setup general vm memory and current memory tags  according params - doesn't change the VM if not set
         """
 
         # TODO do we need to check if the memory is available on host?
@@ -43,32 +41,26 @@ def run(test, params, env):
                 vm_memory_attrs['current_mem'] = int(current_mem)
         except Exception as e:
             test.log.error(f"Wrong test configuration: {(str(e))}")
-        test.log.debug(f"setting memory if provided(count: {(len(vm_memory_attrs))}) (mem: {mem_unit}, {mem_value}, " + 
+        test.log.debug(f"setting memory if provided(count: {(len(vm_memory_attrs))}) (mem: {mem_unit}, {mem_value}, " +
                        f"current: {current_mem_unit}, {current_mem}")
         if len(vm_memory_attrs)>0:
             vmxml.setup_attrs(**vm_memory_attrs)
 
-    def setup_vm_memballoon(vmxml, params):
+    def setup_vm_memballoon():
         """
-        Setup vm memballoon according params
-        ! be aware, that vmxml.sync is part of update_memballoon_xml 
-
-        :params vmxml: vmxml object
-        :params params: Dictionary with the test parameters
+        Setup vm memballoon inside the vm according params
         """
         # not sure if it can be empty, but assuming not ... we will use the "" as not set
         # TODO question: in other tests there is first the memballoon device removed
-        membal_model = params.get("membal_model", "")
-        membal_alias_name = params.get("membal_alias_name", "")
-        if membal_model == "" or membal_alias_name =="":
-            test.error(f"Wrong test configuration: memballoon model and alias are mandatory. Provided values: model ({membal_model}), alias ({membal_alias_name}).")
+        if memballoon_model == "" or memballoon_alias_name =="":
+            test.error(f"Wrong test configuration: memballoonloon model and alias are mandatory. Provided values: model ({memballoon_model}), alias ({memballoon_alias_name}).")
 
-        membal_stats_period = params.get("membal_stats_period")
-        test.log.debug(f"Setting add memballoon ({membal_model}, {membal_alias_name}).")
+        memballoon_stats_period = params.get("memballoon_stats_period","10")
+        test.log.debug(f"Setting add memballoonloon ({memballoon_model}, {memballoon_alias_name}).")
         balloon_dict = {
-            'membal_model': membal_model,
-            'membal_alias_name': membal_alias_name,
-            'membal_stats_period': membal_stats_period
+            'membal_model': memballoon_model,
+            'membal_alias_name': memballoon_alias_name,
+            'membal_stats_period': memballoon_stats_period
         }
 
         libvirt.update_memballoon_xml(vmxml, balloon_dict)
@@ -76,22 +68,66 @@ def run(test, params, env):
     def check_qemu_cmd_line():
         # org_umask = process.run('umask', verbose=True).stdout_text.strip()
         try:
-            qemu_cmd_output = process.run('ps -ef | grep qemu-kvm | grep -v grep').stdout_text.strip()
-            test.log.info(f"Result of qemu cmd output {qemu_cmd_output}")
+            qemu_cmd = "ps -ef | grep qemu-kvm | grep -v grep"
+            qemu_cmd_output = process.run(qemu_cmd,shell=True).stdout_text.strip()
+
+            memballoon_driver = params.get("memballoon_driver","")
+            # TODO if memballoon_driver == "":
+                # variant with memballoon type none
+            pattern = fr'-device\s+{{"driver":"({memballoon_driver}[^"]*)".*?"id":"([^"]+)".*?}}' 
+            matches = re.findall(pattern, qemu_cmd_output)
+
+            device_found = False
+            if memballoon_model == "none" and len(matches)>0:
+                driver, device_id = matches[0]
+                test.fail(f"For memballoon_model == none, there shouldn't be device with balloon related driver ({driver}) and id ({device_id})")
+
+            for _, device_id in matches: 
+                if device_id == memballoon_alias_name:
+                    device_found = True
+                    test.log.info(f"Found correct id: {device_id} with expected memballoon_driver")
+                else:
+                    test.log.debug(f"Found device with expected memballoon_driver ({memballoon_driver}) but different ID {device_id}")
+            if not device_found:
+                test.fail(f"There is no device for driver ({memballoon_driver}) and id ({device_id})")
+
         except Exception as e:
             test.error(f"Failed with: {str(e)}")
+
+    def check_device_on_guest(): 
+        guest_cmd = "lspci -vvv | grep balloon"
+        guest_session = vm.wait_for_login()
+
+        status, stdout = guest_session.cmd_status_output(guest_cmd) 
+        guest_session.close()
+        test.log.debug(f"guest cmd result: {status}, stdout: {stdout}")
+
+        if status != 0:
+            test.fail("Failed to run lscpi command on guest and get device info: ")
+
+        # check returned stdout contains memory balloon string 
+        # the searched string can be set in configuration, or it is by deafult memory balloon
+        memballoon_device_str = params.get("memballoon_device_str","memory balloon")
+        if not memballoon_model == "none":
+            if not re.search(memballoon_device_str, stdout):
+                test.fail(f"Expected string {memballoon_device_str} was not returned from guest lspci command. Returned: ")
+
+        # (or is empty for "none" model
+        else:
+            if not stdout == "":
+                test.fail(f"There shouldn't be any device returned from guest lscpi command with memballoon model none.")
+            
 
     def setup_and_start_vm():
         # setup memory and current memory according fixed settings
         test.log.info("TEST_STEP 1. define VM")
-        setup_vm_memory(vmxml, params)
+        setup_vm_memory()
 
         # setup memballoon according provided parameters
-        setup_vm_memballoon(vmxml, params)
+        setup_vm_memballoon()
 
         test.log.info("TEST_STEP 2. start VM")
-        vm.start()
-
+        vm.start() 
 
     def run_test():
         """
@@ -101,9 +137,13 @@ def run(test, params, env):
         :params vmxml: vmxml object
         :params params: Dictionary with the test parameters
         """
+        #TODO STEP 3 ... check xml
 
-        test.log.info("TEST STEP 3. Check the qemu cmd line")
+        test.log.info("TEST STEP 4. Check the qemu cmd line")
         check_qemu_cmd_line()
+
+        test.log.info("TEST STEP 5. Check device exists on guest")
+        check_device_on_guest()
 
         test.log.debug(virsh.dumpxml(vm_name).stdout_text)
 
@@ -153,6 +193,9 @@ def run(test, params, env):
     vmxml = vm_xml.VMXML.new_from_inactive_dumpxml(vm_name)
     bkxml = vmxml.copy()
 
+    memballoon_model = params.get("memballoon_model", "")
+    memballoon_alias_name = params.get("memballoon_alias_name", "")
+
 
 
     try:
@@ -161,5 +204,6 @@ def run(test, params, env):
 
     finally:
         teardown_test()
+
 
 
