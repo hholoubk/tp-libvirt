@@ -1,4 +1,5 @@
 from virttest import virsh
+from virttest import utils_libvirtd
 import re
 
 from avocado.utils import process
@@ -7,6 +8,8 @@ from virttest.libvirt_xml import vm_xml
 from virttest.libvirt_xml.devices import memballoon
 from virttest.utils_libvirt import libvirt_vmxml
 from virttest.utils_test import libvirt
+
+from provider.virsh_cmd_check import virsh_cmd_check_base
 
 
 def run(test, params, env):
@@ -67,6 +70,7 @@ def run(test, params, env):
 
     def check_qemu_cmd_line():
         # org_umask = process.run('umask', verbose=True).stdout_text.strip()
+        test.log.info("TEST_STEP 4. Check the qemu cmd line")
         try:
             qemu_cmd = "ps -ef | grep qemu-kvm | grep -v grep"
             qemu_cmd_output = process.run(qemu_cmd,shell=True).stdout_text.strip()
@@ -95,6 +99,7 @@ def run(test, params, env):
             test.error(f"Failed with: {str(e)}")
 
     def check_device_on_guest(): 
+        test.log.info("TEST_STEP 5. Check device exists on guest")
         guest_cmd = "lspci -vvv | grep balloon"
         guest_session = vm.wait_for_login()
 
@@ -117,7 +122,6 @@ def run(test, params, env):
             if not stdout == "":
                 test.fail(f"There shouldn't be any device returned from guest lscpi command with memballoon model none.")
             
-
     def setup_and_start_vm():
         # setup memory and current memory according fixed settings
         test.log.info("TEST_STEP 1. define VM")
@@ -129,6 +133,18 @@ def run(test, params, env):
         test.log.info("TEST_STEP 2. start VM")
         vm.start() 
 
+    def check_memballoon_xml():
+        test.log.debug('TEST_STEP 3. check VM XML for memballoon element')
+        # expect_xpath = [ {'element_attrs': [f".//memballoon[@model='{memballoon_model}']"]},
+        expect_xpath = [{'element_attrs': [f".//memballoon[@model='{memballoon_model}']/alias[@name='{memballoon_alias_name}']"]}]
+        xpath_exists = True
+        # TODO check for none model
+        if not libvirt_vmxml.check_guest_xml_by_xpaths(
+                vmxml, expect_xpath, ignore_status=True) == xpath_exists:
+            test.fail("Expect to get '%s' in xml " % expect_xpath)
+        test.log.info('Correct memballoon element found in XML')
+
+
     def run_test():
         """
         Setup vm memballoon device model and aliase according params
@@ -137,37 +153,30 @@ def run(test, params, env):
         :params vmxml: vmxml object
         :params params: Dictionary with the test parameters
         """
-        #TODO STEP 3 ... check xml
 
-        test.log.info("TEST STEP 4. Check the qemu cmd line")
-        check_qemu_cmd_line()
+        check_memballoon_xml() # TEST_STEP 3. check VM XML for memballoon element
+        check_qemu_cmd_line() # TEST_STEP 4. Check the qemu cmd )
+        check_device_on_guest() # TEST_STEP 5. Check device exists on guest
 
-        test.log.info("TEST STEP 5. Check device exists on guest")
-        check_device_on_guest()
+        # TODO .. how does it work with tmp_data_dir? 
+        save_file_name = "/tmp/avocado.save"
+        test.log.debug('TEST_STEP 6. save and restore VM ')
+        virsh_helper.check_save_restore(save_file_name)
 
-        test.log.debug(virsh.dumpxml(vm_name).stdout_text)
+        test.log.debug('TEST_STEP 7. restart virtqemud') 
+        if not libvirtd.restart():
+            test.fail("fail to restart libvirtd")
+
+        # TODO .. not relevant for "none model ... 
+        test.log.debug('TEST_STEP 8. check disk/memory cache ')
+        virsh_helper.check_disk_caches()
+
 
     def run_test2():
         """
         Define and start guest
         Check No error msg prompts without guest memory balloon driver.
         """
-        test.log.info("TEST_STEP1: Define guest")
-        vmxml = vm_xml.VMXML.new_from_inactive_dumpxml(vm_name)
-
-        vmxml.del_device('memballoon', by_tag=True)
-        mem_balloon = memballoon.Memballoon()
-        mem_balloon.setup_attrs(**device_dict)
-        vmxml.devices = vmxml.devices.append(mem_balloon)
-
-        vmxml.setup_attrs(**mem_attrs)
-        vmxml.sync()
-
-        test.log.info("TEST_STEP2: Start guest ")
-        if not vm.is_alive():
-            vm.start()
-        vmxml = vm_xml.VMXML.new_from_dumpxml(vm_name)
-        test.log.debug("After define vm, get vmxml is:\n%s", vmxml)
 
         test.log.info("TEST_STEP3: Remove virtio_balloon module in guest")
         remove_module(module)
@@ -184,19 +193,21 @@ def run(test, params, env):
         """
         Clean data.
         """
+        test.log.debug(virsh.dumpxml(vm_name).stdout_text)
         test.log.info("TEST_TEARDOWN: Clean up env.")
+        virsh_helper.teardown()
         bkxml.sync()
 
     test.log.info("TEST_SETUP: backup and define: guest ")
     vm_name = params.get("main_vm")
     vm = env.get_vm(vm_name)
     vmxml = vm_xml.VMXML.new_from_inactive_dumpxml(vm_name)
+    virsh_helper = virsh_cmd_check_base.VirshCmdCheck(vm, vm_name, params,test)
+    libvirtd = utils_libvirtd.Libvirtd("virtqemud")
     bkxml = vmxml.copy()
 
     memballoon_model = params.get("memballoon_model", "")
     memballoon_alias_name = params.get("memballoon_alias_name", "")
-
-
 
     try:
         setup_and_start_vm()
