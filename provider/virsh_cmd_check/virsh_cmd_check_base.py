@@ -42,12 +42,16 @@ class VirshCmdCheck(object):
         libvirt.check_exit_status(ret)
         self.test.log.debug(f"TEST_STEP: restore of vm and command check passed")
 
-    def check_disk_caches(self):
+    def check_disk_caches(self,session=None):
         """
         Test virsh command dommemstat related cases
         """
 
+        if session:
+            self.session = session
+
         # Get info from virsh dommemstat command
+        self.test.log.debug(f"TEST_STEP: getting dommemstat from {self.vm_name}")
         dommemstat_output = virsh.dommemstat(
                 self.vm_name, debug=True).stdout_text.strip()
         dommemstat = {}
@@ -58,7 +62,6 @@ class VirshCmdCheck(object):
         # Get info from vm
         if not self.session:
             self.session = self.vm.wait_for_login()
-
 
         meminfo_keys = ['Buffers', 'Cached', 'SwapCached']
         meminfo = {k: utils_misc.get_mem_info(self.session, k) for k in meminfo_keys}
@@ -84,6 +87,11 @@ class VirshCmdCheck(object):
                           (tmp_sum, dommemstat['disk_caches'], allow_error)
                           )
 
+        self.test.log.debug('Buffers + Cached + SwapCached (%d) '
+                          'should be close to disk_caches (%s). '
+                          'Allowable error: %.2f%%' %
+                          (tmp_sum, dommemstat['disk_caches'], allow_error)
+                          )
 
     def teardown(self):
         if self.save_file and os.path.exists(self.save_file):

@@ -1,6 +1,7 @@
 from virttest import virsh
 from virttest import utils_libvirtd
 import re
+import time
 
 from avocado.utils import process
 
@@ -158,6 +159,10 @@ def run(test, params, env):
         check_qemu_cmd_line() # TEST_STEP 4. Check the qemu cmd )
         check_device_on_guest() # TEST_STEP 5. Check device exists on guest
 
+        test.log.debug('TEST_STEP 8. check disk/memory cache ')
+        virsh_helper.check_disk_caches()
+
+
         # TODO .. how does it work with tmp_data_dir? 
         save_file_name = "/tmp/avocado.save"
         test.log.debug('TEST_STEP 6. save and restore VM ')
@@ -166,6 +171,8 @@ def run(test, params, env):
         test.log.debug('TEST_STEP 7. restart virtqemud') 
         if not libvirtd.restart():
             test.fail("fail to restart libvirtd")
+        test.log.debug("----------------------------------------------------------------------------")
+        time.sleep(60)
 
         # TODO .. not relevant for "none model ... 
         test.log.debug('TEST_STEP 8. check disk/memory cache ')
@@ -214,6 +221,8 @@ def run(test, params, env):
         run_test()
 
     finally:
+        test.log.debug("----------------------------------------------------------------------------")
+        time.sleep(60)
         teardown_test()
 
 
