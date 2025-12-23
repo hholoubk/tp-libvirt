@@ -62,3 +62,10 @@ tools/github/*cache
 tmp
 .*.swp
 RELEASE-VERSION
+
+# Local test scripts and documentation
+RUN_ALL_TESTS.sh
+TESTS_BY_CATEGORY.txt
+TESTS_TO_RUN.txt
+extract_test_names.sh
+test_serial_console_changes.txt
