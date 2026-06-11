@@ -71,6 +71,7 @@ def prepare_env(vm, params, test):
 
         if not vm.is_alive():
             vm.start()
+        vm.address_cache.drop(vm.get_mac_address(0).lower())
         session = vm.wait_for_login(timeout=120)
         current_boot = session.cmd("uname -r").strip()
         # To enable SVE: Hardware support && enable kconfig
@@ -456,6 +457,7 @@ def run(test, params, env):
         libvirt.check_result(result, expected_fails=expect_msg)
         # Test boot successfully
         if not status_error:
+            vm.address_cache.drop(vm.get_mac_address(0).lower())
             session = vm.wait_for_login(timeout=120)
             if expect_sve:
                 # Expect SVE is enabled in domain xml
