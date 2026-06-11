@@ -46,6 +46,19 @@ def get_vector_lengths(vm_name):
     return (supported_list, unsupported_list)
 
 
+def login_guest(vm, timeout=120):
+    """
+    Log into guest after (re)start.
+
+    Drop stale DHCP cache and recreate serial console before login.
+    virsh.start() does not set up the serial console like vm.start().
+    """
+    vm.address_cache.drop(vm.get_mac_address(0).lower())
+    vm.cleanup_serial_console()
+    vm.create_serial_console()
+    return vm.wait_for_login(timeout=timeout, serial=True)
+
+
 def prepare_env(vm, params, test):
     """
     Prepare test env
@@ -71,8 +84,7 @@ def prepare_env(vm, params, test):
 
         if not vm.is_alive():
             vm.start()
-        vm.address_cache.drop(vm.get_mac_address(0).lower())
-        session = vm.wait_for_login(timeout=120)
+        session = login_guest(vm)
         current_boot = session.cmd("uname -r").strip()
         # To enable SVE: Hardware support && enable kconfig
         # CONFIG_ARM64_SVE
@@ -457,8 +469,7 @@ def run(test, params, env):
         libvirt.check_result(result, expected_fails=expect_msg)
         # Test boot successfully
         if not status_error:
-            vm.address_cache.drop(vm.get_mac_address(0).lower())
-            session = vm.wait_for_login(timeout=120)
+            session = login_guest(vm)
             if expect_sve:
                 # Expect SVE is enabled in domain xml
                 if not guest_has_sve(session, params, test):
