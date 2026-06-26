@@ -17,9 +17,10 @@ from provider.guest_os_booting import guest_os_booting_base as guest_os
 
 def run(test, params, env):
     """
-    This case it to very the ovmf firmware feature.
+    Verify the ovmf firmware feature.
     1) Prepare a guest with related firmware feature.
     2) Start and boot the guest.
+    3) Optionally verify secure boot in guest dmesg via check_vm_startup.
     """
     vm_name = guest_os.get_vm(params)
     firmware_dict = eval(params.get("firmware_dict", "{}"))
@@ -43,7 +44,7 @@ def run(test, params, env):
             else:
                 test.fail("Failed to define the guest because error:%s" % str(details))
         if not status_error:
-            vmxml = guest_os.check_vm_startup(vm, vm_name)
+            vmxml = guest_os.check_vm_startup(vm, vm_name, params=params)
             test.log.info("The active dumpxml for guest: %s" % vmxml)
             libvirt_vmxml.check_guest_xml_by_xpaths(vmxml, firmware_xpath)
     finally:

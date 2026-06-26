@@ -7,12 +7,15 @@ from avocado.utils import download
 from avocado.utils import process
 
 from virttest import virsh
+from virttest import utils_sys
 from virttest.libvirt_xml import vm_xml
 from virttest.utils_libvirt import libvirt_bios
 from virttest.utils_test import libvirt
 
 
 LOG = logging.getLogger('avocado.' + __name__)
+
+SECURE_BOOT_DMESG_ENABLED = "Secure boot enabled"
 
 
 def get_vm(params):
@@ -94,18 +97,53 @@ def prepare_smm_xml(vm_name, smm_state, smm_size):
     return vmxml
 
 
-def check_vm_startup(vm, vm_name, error_msg=None):
+def check_secure_boot_dmesg(session, enabled=True):
+    """
+    Check UEFI secure boot status in guest dmesg.
+
+    :param session: active guest session
+    :param enabled: True if secure boot should be enabled, False otherwise
+    :return: True if dmesg matches expectation, False otherwise
+    """
+    return utils_sys.check_dmesg_output(
+        SECURE_BOOT_DMESG_ENABLED, expect=enabled, session=session
+    )
+
+
+def run_post_startup_checks(session, params):
+    """
+    Run optional in-guest checks after a successful boot.
+
+    :param session: active guest session
+    :param params: test parameters
+    :raises: exceptions.TestFail if a configured check fails
+    """
+    if params.get("check_dmesg", "no") != "yes":
+        return
+
+    enabled = params.get("dmesg_expect", "yes") == "yes"
+    if not check_secure_boot_dmesg(session, enabled=enabled):
+        raise exceptions.TestFail(
+            "Secure boot dmesg check failed (expect enabled=%s)" % enabled
+        )
+
+
+def check_vm_startup(vm, vm_name, error_msg=None, params=None):
     """
     Start and boot the guest
 
     :params vm: vm object
     :params vm_name: the name of guest
+    :params params: optional test params for in-guest post-start checks
     """
     ret = virsh.start(vm_name, timeout=30, debug=True)
     vmxml = vm_xml.VMXML.new_from_dumpxml(vm_name)
     libvirt.check_result(ret, expected_fails=error_msg)
     if not error_msg:
-        vm.wait_for_login().close()
+        session = vm.wait_for_login()
+        if params:
+            run_post_startup_checks(session, params)
+        session.close()
         LOG.debug("Succeed to boot %s", vm_name)
     return vmxml
 
