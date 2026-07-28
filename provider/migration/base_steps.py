@@ -101,7 +101,9 @@ class MigrationBase(object):
                 self.vm.wait_for_login().close()
         if self.check_cont_ping:
             self.test.log.debug("Starting ping command to check network during migration...")
-            vm_session = self.vm.wait_for_login()
+            self.vm.cleanup_serial_console()
+            self.vm.create_serial_console()
+            vm_session = self.vm.wait_for_serial_login()
             ping_cmd = "ping 8.8.8.8 > %s 2>&1 &" % self.check_cont_ping_log
             vm_session.sendline(ping_cmd)
 
