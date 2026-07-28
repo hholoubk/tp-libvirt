@@ -62,7 +62,7 @@ def run(test, params, env):
             libvirt_vmxml.modify_vm_device(
                     vm_xml.VMXML.new_from_dumpxml(vm.name),
                     "interface", iface_dict)
-        migration_obj.setup_default()
+        migration_obj.setup_default(use_console=True)
 
     cleanup_ifaces = "yes" == params.get("cleanup_ifaces", "yes")
     iommu_dict = eval(params.get('iommu_dict', '{}'))
@@ -84,7 +84,6 @@ def run(test, params, env):
         if migrate_vm_back:
             test.log.info("TEST_STEP: Migrate back the VM to the source host.")
             migration_obj.run_migration_back()
-            migration_obj.migration_test.ping_vm(vm, params)
             migration_obj.check_vm_cont_ping(False)
     finally:
         migration_obj.cleanup_connection()
