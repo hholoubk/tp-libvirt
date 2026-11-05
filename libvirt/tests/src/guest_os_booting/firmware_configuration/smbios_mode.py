@@ -115,6 +115,15 @@ def run(test, params, env):
     os_dict = eval(params.get("os_dict", "{}"))
     smbios_mode = params.get("smbios_mode")
     error_msg = params.get("error_msg", "")
+
+    if smbios_mode == "host":
+        host_baseboards = process.run("dmidecode -t 2").stdout_text
+        baseboard_count = len(re.findall(r"^Handle .* DMI type 2,",
+                                         host_baseboards, re.MULTILINE))
+        if baseboard_count > 1:
+            test.cancel("QEMU does not support host SMBIOS mode with more "
+                        f"than one Type 2 (baseboard) entry; found {baseboard_count}")
+
     with_sysinfo = "yes" == params.get("with_sysinfo", "no")
     type_entry = eval(params.get("sysinfo_type", "{}"))
     bios_entry = eval(params.get("sysinfo_bios", "{}"))
